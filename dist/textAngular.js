@@ -45,7 +45,42 @@ var _browserDetect = {
 	webkit: /AppleWebKit\/([\d.]+)/i.test(navigator.userAgent)
 };
 
-// Gloabl to textAngular REGEXP vars for block and list elements.
+// Global to textAngular to measure performance where needed
+var performance = performance || {};
+performance.now = (function() {
+	return performance.now       ||
+		performance.mozNow    ||
+		performance.msNow     ||
+		performance.oNow      ||
+		performance.webkitNow ||
+		function() { return new Date().getTime(); };
+})();
+// usage is:
+// var t0 = performance.now();
+// doSomething();
+// var t1 = performance.now();
+// console.log('Took', (t1 - t0).toFixed(4), 'milliseconds to do something!');
+//
+
+// turn html into pure text that shows visiblity
+function stripHtmlToText(html)
+{
+	var tmp = document.createElement("DIV");
+	tmp.innerHTML = html;
+	var res = tmp.textContent || tmp.innerText || "";
+	res = res.replace(/\n/, "");
+	return res.trim();
+}
+// get html
+function getDomFromHtml(html)
+{
+	var tmp = document.createElement("DIV");
+	tmp.innerHTML = html;
+	return tmp;
+}
+
+
+// Global to textAngular REGEXP vars for block and list elements.
 
 var BLOCKELEMENTS = /^(address|article|aside|audio|blockquote|canvas|dd|div|dl|fieldset|figcaption|figure|footer|form|h1|h2|h3|h4|h5|h6|header|hgroup|hr|noscript|ol|output|p|pre|section|table|tfoot|ul|video)$/i;
 var LISTELEMENTS = /^(ul|li|ol)$/i;
@@ -960,29 +995,28 @@ angular.module('textAngular.validators', [])
 });
 angular.module('textAngular.taBind', ['textAngular.factories', 'textAngular.DOM'])
 .service('_taBlankTest', [function(){
-	var INLINETAGS_NONBLANK = /<(a|abbr|acronym|bdi|bdo|big|cite|code|del|dfn|img|ins|kbd|label|map|mark|q|ruby|rp|rt|s|samp|time|tt|var|table)[^>]*(>|$)/i;
 	return function(_defaultTest){
 		return function(_blankVal){
+			// we radically restructure this code.
+			// what was here before was incredibly fragile.
+			// What we do now is to check that the html is non-blank visually
+			// which we check by looking at html->text
 			if(!_blankVal) return true;
 			// find first non-tag match - ie start of string or after tag that is not whitespace
-			var _firstMatch = /(^[^<]|>)[^<]/i.exec(_blankVal);
-			var _firstTagIndex;
-			if(!_firstMatch){
-				// find the end of the first tag removing all the
-				// Don't do a global replace as that would be waaayy too long, just replace the first 4 occurences should be enough
-				_blankVal = _blankVal.toString().replace(/="[^"]*"/i, '').replace(/="[^"]*"/i, '').replace(/="[^"]*"/i, '').replace(/="[^"]*"/i, '');
-				_firstTagIndex = _blankVal.indexOf('>');
-			}else{
-				_firstTagIndex = _firstMatch.index;
+			// var t0 = performance.now();
+			// Takes a small fraction of a mSec to do this...
+			var _text_ = stripHtmlToText(_blankVal);
+			// var t1 = performance.now();
+			// console.log('Took', (t1 - t0).toFixed(4), 'milliseconds to generate:');
+			if (_text_=== '') {
+				// img generates a visible item so it is not blank!
+				if (/<img[^>]+>/.test(_blankVal)) {
+					return false;
+				}
+				return true;
+			} else {
+				return false;
 			}
-			_blankVal = _blankVal.trim().substring(_firstTagIndex, _firstTagIndex + 100);
-			// check for no tags entry
-			if(/^[^<>]+$/i.test(_blankVal)) return false;
-			// this regex is to match any number of whitespace only between two tags
-			if (_blankVal.length === 0 || _blankVal === _defaultTest || /^>(\s|&nbsp;)*<\/[^>]+>$/ig.test(_blankVal)) return true;
-			// this regex tests if there is a tag followed by some optional whitespace and some text after that
-			else if (/>\s*[^\s<]/i.test(_blankVal) || INLINETAGS_NONBLANK.test(_blankVal)) return false;
-			else return true;
 		};
 	};
 }])
@@ -2421,6 +2455,19 @@ textAngular.directive("textAngular", [
 					$animate.enabled(false, scope.displayElements.html);
 					$animate.enabled(false, scope.displayElements.text);
 					//Show the HTML view
+					var _model;
+					/* istanbul ignore next: ngModel exists check */
+					if (attrs.ngModell) {
+						_model = ngModel.$viewValue;
+					} else {
+						_model = scope.html;
+					}
+					var _html = scope.displayElements.html[0].value;
+					if (getDomFromHtml(_html).childElementCount !== getDomFromHtml(_model).childElementCount) {
+						// the model and the html do not agree
+						// they can get out of sync and when they do, we correct that here...
+						scope.displayElements.html.val(_model);
+					}
 					if(scope.showHtml){
 						//defer until the element is visible
 						$timeout(function(){
